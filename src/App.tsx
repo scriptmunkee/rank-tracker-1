@@ -1,45 +1,61 @@
-import React, { useState, useEffect } from "react";
-import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
-import { auth } from "./firebase";
-import Profile from "./components/Profile";
-import Home from "./components/Home";
-import AddPost from "./components/AddPost";
-import SignIn from "./components/SignIn";
-import { User as FirebaseUser } from "firebase/auth";
-import WelcomeScreen from "./components/WelcomeScreen";
-import BottomTabBar from "./components/BottomTabBar";
+import React, { useState, useEffect } from 'react';
+import { initializeDatabase } from './database';
 
-const App: React.FC = () => {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
+interface SearchResult {
+  id: number;
+  keyword: string;
+  date: string;
+  rank: number;
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+function App() {
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      setUser(user);
-    });
-    return () => unsubscribe();
+    async function fetchData() {
+      const db = await initializeDatabase();
+      const fetchedKeywords = await db.all('SELECT DISTINCT keyword FROM search_results');
+      setKeywords(fetchedKeywords.map(k => k.keyword));
+
+      const latestResults = await db.all(`
+        SELECT * FROM search_results
+        WHERE (keyword, date) IN (
+          SELECT keyword, MAX(date) 
+          FROM search_results 
+          GROUP BY keyword
+        )
+        ORDER BY keyword, rank
+      `);
+      setResults(latestResults);
+      await db.close();
+    }
+    fetchData();
   }, []);
 
   return (
-    <Router>
-      <div className="app flex flex-col min-h-screen">
-        <main className="flex-grow">
-          {user ? (
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/add-post" element={<AddPost />} />
-            </Routes>
-          ) : (
-            <Routes>
-              <Route path="/" element={<WelcomeScreen />} />
-              <Route path="/signin" element={<SignIn />} />
-            </Routes>
-          )}
-        </main>
-        {user && <BottomTabBar />}
-      </div>
-    </Router>
+    <div>
+      <h1>Keyword Rank Tracker</h1>
+      {keywords.map(keyword => (
+        <div key={keyword}>
+          <h2>{keyword}</h2>
+          <ul>
+            {results
+              .filter(r => r.keyword === keyword)
+              .map(result => (
+                <li key={result.id}>
+                  Rank {result.rank}: {result.title} - <a href={result.url} target="_blank" rel="noopener noreferrer">{result.url}</a>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+      ))}
+    </div>
   );
-};
+}
 
 export default App;
